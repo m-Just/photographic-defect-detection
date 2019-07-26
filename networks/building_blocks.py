@@ -91,3 +91,40 @@ class InvertedResidual(nn.Module):
         out = channel_shuffle(out, 2)
 
         return out
+
+
+class GroupedConvBlock(nn.Module):
+    def __init__(self, num_inputs, num_outputs, num_channels_per_group,
+                 norm_type='batch_norm'):
+        super(GroupedConvBlock, self).__init__()
+        self.num_outputs = num_outputs
+        self.ncpg = num_channels_per_group
+
+        def get_norm_layer(num_outputs, total_ch):
+            if norm_type == 'batch_norm':
+                return nn.BatchNorm2d(total_ch)
+            elif norm_type == 'group_norm':
+                return nn.GroupNorm(num_outputs, total_ch)
+            else:
+                raise ValueError()
+
+        total_ch = num_channels_per_group * num_outputs
+        self.conv = nn.Sequential(
+            conv1x1(num_inputs, total_ch),
+            get_norm_layer(num_outputs, total_ch),
+            nn.ReLU(),
+
+            conv3x3(total_ch, total_ch, groups=num_outputs),
+            get_norm_layer(num_outputs, total_ch),
+            nn.ReLU(),
+
+            conv3x3(total_ch, total_ch, groups=num_outputs),
+            get_norm_layer(num_outputs, total_ch),
+            nn.ReLU())
+
+    def forward(self, x):
+        x = self.conv(x)
+        x_list = []
+        for i in range(self.num_outputs):
+            x_list.append(x[:, i * self.ncpg : (i+1) * self.ncpg])
+        return torch.stack(x_list, dim=1)

@@ -193,7 +193,7 @@ class RegressionModel(DefectDetection):
             if i == self.sat_idx:
                 outputs.append(logits[:, i])
             else:
-                outputs.append(F.sigmoid(logits[:, i]))
+                outputs.append(logits[:, i].sigmoid())
         return torch.stack(outputs, dim=1).type_as(logits)
 
     def compute_loss(self, outputs, labels, loss_masks):

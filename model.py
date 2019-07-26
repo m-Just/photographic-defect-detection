@@ -1,13 +1,17 @@
+import math
 import copy
+from itertools import chain
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from networks.backbone.shufflenet import shufflenet
 from networks.backbone.shufflenet_v2 import shufflenet_v2
 from networks.backbone.resnet import resnet
 from networks.pred_heads import SimpleLinearHead, SeparatedHead
-from networks.pred_heads import HybridHead, GroupedConvHead
+from networks.pred_heads import HybridHead
+from networks.building_blocks import GroupedConvBlock
 from utils import ema_over_state_dict
 
 __all__ = ['Network']
@@ -15,12 +19,15 @@ __all__ = ['Network']
 
 def get_linear_head(config, num_inputs, num_outputs, is_sat):
     if config.logits_act_type in ['none', 'sigmoid']:
-        head = SimpleLinearHead(num_inputs, num_outputs, dropout_rate=config.dropout_rate)
+        head = SimpleLinearHead(num_inputs, num_outputs,
+                                dropout_rate=config.dropout_rate)
     elif config.logits_act_type == 'softmax':
         num_bins = config.sat_num_softmax_bins if is_sat else config.num_softmax_bins
-        head = SimpleLinearHead(num_inputs, num_bins, dropout_rate=config.dropout_rate)
+        head = SimpleLinearHead(num_inputs, num_bins,
+                                dropout_rate=config.dropout_rate)
     else:
-        raise ValueError('Unrecognized activation type: ' + str(config.logits_act_type))
+        raise ValueError('Unrecognized activation type: '
+                         + str(config.logits_act_type))
     return head
 
 
@@ -36,7 +43,7 @@ def get_heads_by_defect(config, num_inputs):
 class Network(nn.Module):
     def __init__(self, config):
         super(Network, self).__init__()
-        self.use_hybrid_head = config.num_hybrids > 0
+        self.global_pooling_mode = config.global_pooling_mode
 
         # define backbone network
         if config.net_type == 'shufflenet':
@@ -54,26 +61,21 @@ class Network(nn.Module):
         else:
             raise ValueError()
 
+        num_inputs = self.backbone.num_output_channels
+        print(f'Number of backbone output channels: {num_inputs}')
+
+        # define intermediate layers between backbone and head
+        self.neck = None
+        if config.num_channels_per_group:
+            self.neck = GroupedConvBlock(
+                num_inputs, len(config.selected_defects),
+                config.num_channels_per_group, config.gc_norm_type)
+            num_inputs = config.num_channels_per_group
+
         # define prediction head
-        num_inputs = self.backbone.num_outputs
-        print(f'Number of inputs to prediction head: {num_inputs}')
-
-        if config.num_channels_per_group:
-            # define a set of linear heads for each group
-            head_list = get_heads_by_defect(config, config.num_channels_per_group)
-        else:
-            # define the whole set of linear heads at once
-            head_list = get_heads_by_defect(config, num_inputs)
-        head = SeparatedHead(*head_list)
-
-        if self.use_hybrid_head:
+        head = SeparatedHead(*get_heads_by_defect(config, num_inputs))
+        if config.num_hybrids:
             head = HybridHead(head, config.num_hybrids, config.hybrid_test_id)
-
-        # DEBUG
-        if config.num_channels_per_group:
-            gc_head = GroupedConvHead(num_inputs, config.num_channels_per_group)
-            head = nn.Sequential(gc_head, head)
-
         self.head = head
 
         # restore model
@@ -88,7 +90,7 @@ class Network(nn.Module):
                 self.restore(self.backbone, self.pretrained_path,
                              err_handling=config.model_restore_err_handling)
                 self.pretrain_params = self.backbone.parameters()
-                self.randinit_params = self.head.parameters()
+                self.randinit_params = chain(self.head.parameters(), self.neck.parameters())
                 print('Successfully loading imagenet-pretrained model')
         else:
             self.pretrain_params = None
@@ -121,7 +123,7 @@ class Network(nn.Module):
         state_dict = module.state_dict()
         pretrained_dict = torch.load(ckpt_path)
         pretrained_dict = {k[7:] if k.startswith('module') else k: v
-            for k, v in pretrained_dict.items()}
+                           for k, v in pretrained_dict.items()}
 
         try:
             module.load_state_dict(pretrained_dict)
@@ -135,7 +137,8 @@ class Network(nn.Module):
             else:
                 raise ValueError()
 
-        pretrained_dict = {k: v for k, v in pretrained_dict.items() if k in state_dict}
+        pretrained_dict = {k: v for k,
+                           v in pretrained_dict.items() if k in state_dict}
         module.load_state_dict(pretrained_dict)
 
     def save_to(self, model_root, epoch):
@@ -146,14 +149,48 @@ class Network(nn.Module):
             self.save(self.ema_state_dict, ema_ckpt_path)
 
     def update_ema_weights(self):
-        ema_over_state_dict(self.ema_state_dict, self.state_dict(), self.ema_alpha)
+        ema_over_state_dict(self.ema_state_dict,
+                            self.state_dict(), self.ema_alpha)
 
     def forward(self, x, hybrid_id=None):
         x = self.backbone(x)
 
-        # DEBUG
-        # x = HybridHead.forward_via(self.head, x, hybrid_id)
-        if self.use_hybrid_head:
+        if self.neck is not None:
+            if isinstance(self.neck, GroupedConvBlock):
+                x = self.neck(x)
+            else:
+                raise RuntimeError()
+
+        # GroupedConvBlock produces 5D outputs, however adaptive_avg_pool2d
+        # only accept 4D inputs, thus we need to reshape the tensor into 4D
+        batch_size, sizes = x.size(0), x.size()[1:-2]
+        x = x.view(batch_size, -1, x.size(-2), x.size(-1))
+
+        # convert feature maps into vectors by pooling
+        if self.global_pooling_mode == 'average':
+            x = F.adaptive_avg_pool2d(x, (1, 1))
+        elif self.global_pooling_mode == 'combined':
+            x_avg = F.adaptive_avg_pool2d(x, (1, 1))
+            x_max = F.adaptive_max_pool2d(x, (1, 1))
+            x = (x_avg + x_max) / 2
+        else:
+            spatial_size = x.size(-1)
+            s = round(math.sqrt(spatial_size))
+            if self.global_pooling_mode == 'avgofmax':
+                x = F.adaptive_max_pool2d(x, (s, s))
+                x = F.adaptive_avg_pool2d(x, (1, 1))
+            elif self.global_pooling_mode == 'maxofavg':
+                x = F.adaptive_avg_pool2d(x, (s, s))
+                x = F.adaptive_max_pool2d(x, (1, 1))
+            else:
+                raise ValueError()
+
+        # restore the dimensions previous merged
+        assert x.size(-1) == 1 and x.size(-2) == 1
+        x = x.view(batch_size, *sizes)
+
+        # feature vectors into final outputs
+        if isinstance(self.head, HybridHead):
             x = self.head(x, h=hybrid_id)
         else:
             x = self.head(x)
@@ -168,10 +205,12 @@ class DeepShallowNetwork(Network):
         self.normalize_head = config.normalize_head
         self.deep_net = deep_net
         self.shallow_net = shallow_net
-        self.pretrain_params = list(deep_net.pretrain_params) + list(shallow_net.pretrain_params)
-        self.randinit_params = list(deep_net.randinit_params) + list(shallow_net.randinit_params)
+        self.pretrain_params = list(
+            deep_net.pretrain_params) + list(shallow_net.pretrain_params)
+        self.randinit_params = list(
+            deep_net.randinit_params) + list(shallow_net.randinit_params)
 
-        num_inputs = deep_net.backbone.num_outputs + shallow_net.backbone.num_outputs
+        num_inputs = deep_net.backbone.num_output_channels + shallow_net.backbone.num_output_channels
         head_list = get_heads_by_defect(config, num_inputs)
         self.head = SeparatedHead(*head_list)
 

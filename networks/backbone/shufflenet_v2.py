@@ -39,7 +39,7 @@ class ShuffleNetV2(nn.Module):
             nn.Conv2d(input_channels, output_channels, 1, 1, 0, bias=False),
             nn.BatchNorm2d(output_channels),
             nn.ReLU(inplace=True))
-        self.num_outputs = output_channels
+        self.num_output_channels = output_channels
 
     def forward(self, x):
         x = self.conv1(x)
@@ -48,7 +48,6 @@ class ShuffleNetV2(nn.Module):
         x = self.stage3(x)
         x = self.stage4(x)
         x = self.conv5(x)
-        x = x.mean([2, 3])  # globalpool
         return x
 
 

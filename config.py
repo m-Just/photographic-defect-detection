@@ -41,7 +41,7 @@ def parse_train_args():
     parser.add_argument('--load_pretrained', action='store_true', help='whether to use pretrained model or randomly initialized model')
     parser.add_argument('--ckpt_path', type=str, default='', help='leave blank to use imagenet pretrained weight')
     parser.add_argument('--dropout_rate', type=float, default=0.5)
-    parser.add_argument('--global_pooling_mode', type=str, default='average', help='average or combined')
+    parser.add_argument('--global_pooling_mode', type=str, default='average', help='average, combined, avgofmax or maxofavg')
 
     # shufflenet configurations
     parser.add_argument('--groups', type=int, default=8)
@@ -63,6 +63,7 @@ def parse_train_args():
 
     # prediction head - convolution grouped by defects
     parser.add_argument('--num_channels_per_group', type=int, default=0, help='a positive integer for the separated grouped convolution as part of prediction head')
+    parser.add_argument('--gc_norm_type', type=str, default='batch_norm', help='batch_norm or group_norm')
 
     # optimization
     parser.add_argument('--sat_loss_weight', type=float, default=1.0, help='currently only works for the regression model')

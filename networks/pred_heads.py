@@ -5,7 +5,7 @@ import torch.nn as nn
 
 from networks.building_blocks import conv3x3, conv1x1
 
-__all__ = ['SimpleLinearHead', 'HybridHead', 'GroupedConvHead']
+__all__ = ['SimpleLinearHead', 'HybridHead']
 
 
 def simple_linear_layer(num_inputs, num_outputs, dropout_rate=0.5):
@@ -31,10 +31,18 @@ class SeparatedHead(nn.Module):
             setattr(self, f'output_{i}', head)
 
     def forward(self, x):
+        '''
+        Args:
+            x: a tensor which dimension can be 2 or 3. If dimension is 2 then
+                all heads share the same input x, otherwise, the i-th head
+                uses x[:, i] as input.
+        Returns:
+            outputs of each head concatenated at dim=1.
+        '''
         x_list = []
         for i in range(self.num_outputs):
             head = getattr(self, f'output_{i}')
-            x_ = head(x)
+            x_ = head(x[:, i] if x.dim() == 3 else x)   # TODO
             x_list.append(x_)
             assert x_.dim() == 2
         return torch.cat(x_list, dim=1)
@@ -75,29 +83,3 @@ class HybridHead(nn.Module):
             x_ = layer(x[i].unsqueeze(0))
             x_list.append(x_)
         return torch.cat(x_list, dim=0)
-
-
-class GroupedConvHead(nn.Module):
-    def __init__(self, num_inputs, num_outputs, num_channels_per_group):
-        super(GroupedConvHead, self).__init__()
-        self.num_outputs = num_outputs
-        self.ncpg = num_channels_per_group
-
-        total_ch = num_channels_per_group * num_outputs
-        self.conv = nn.Sequential(
-            conv1x1(num_inputs, total_ch),
-            nn.BatchNorm2d(total_ch),
-            nn.ReLU(),
-
-            conv3x3(total_ch, total_ch, groups=num_outputs),
-            nn.BatchNorm2d(total_ch),
-            nn.ReLU(),
-
-            conv3x3(total_ch, total_ch, groups=num_outputs),
-            nn.BatchNorm2d(total_ch),
-            nn.ReLU())
-
-    def forward(self, x):
-        x = self.conv(x)
-        raise NotImplementedError('Hybrid head not supported')
-        return x

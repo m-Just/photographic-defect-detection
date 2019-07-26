@@ -163,19 +163,10 @@ class ShuffleNet(nn.Module):
         # Stage 4
         if trunc_stage:
             self.stage4 = None
-            self.num_outputs = self.stage_out_channels[3]
+            self.num_output_channels = self.stage_out_channels[3]
         else:
             self.stage4 = self._make_stage(4)
-            self.num_outputs = self.stage_out_channels[4]
-
-        # Global pooling
-        if global_pooling_mode == 'average':
-            self.global_pool = lambda x: F.avg_pool2d(x, x.size()[-2:])
-        elif global_pooling_mode == 'combined':
-            self.global_pool = lambda x: (F.avg_pool2d(x, x.size()[-2:]) +
-                                          F.max_pool2d(x, x.size()[-2:])) / 2
-        else:
-            raise ValueError()
+            self.num_output_channels = self.stage_out_channels[4]
 
         self.init_params()
 
@@ -233,8 +224,6 @@ class ShuffleNet(nn.Module):
         x = self.stage3(x)
         if self.stage4 is not None:
             x = self.stage4(x)
-        x = self.global_pool(x)
-        x = x.view(x.size(0), -1)
         return x
 
 

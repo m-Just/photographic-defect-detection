@@ -88,6 +88,7 @@ def get_transform_params(config, mode):
 class DatasetFrame(data.Dataset):
     def __init__(self, img_dir, csv_file, selected_defects, transform_params,
                  label_parsing_func=None):
+        self.img_dir = img_dir
         self.selected_defects = selected_defects
         self.transform = self.get_transform(**transform_params)
 
@@ -172,10 +173,10 @@ class TrainSet(DatasetFrame):
 
     def get_data_weights(self, version):
         if version == 1:
-            print('Using data sampling v1')
+            print(f'Using data sampling v1 for {self.img_dir}')
             return self._get_data_weights_v1()
         elif version == 2:
-            print('Using data sampling v2')
+            print(f'Using data sampling v2 for {self.img_dir}')
             return self._get_data_weights_v2()
         else:
             raise ValueError()
