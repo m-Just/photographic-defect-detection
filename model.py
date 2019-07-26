@@ -36,6 +36,7 @@ def get_heads_by_defect(config, num_inputs):
 class Network(nn.Module):
     def __init__(self, config):
         super(Network, self).__init__()
+        self.use_hybrid_head = config.num_hybrids > 0
 
         # define backbone network
         if config.net_type == 'shufflenet':
@@ -65,13 +66,13 @@ class Network(nn.Module):
             head_list = get_heads_by_defect(config, num_inputs)
         head = SeparatedHead(*head_list)
 
-        if config.num_hybrids:
+        if self.use_hybrid_head:
             head = HybridHead(head, config.num_hybrids, config.hybrid_test_id)
 
+        # DEBUG
         if config.num_channels_per_group:
-            # DEBUG
-            raise NotImplementedError()
-            # head = GroupedConvHead(head, num_inputs, config.num_channels_per_group)
+            gc_head = GroupedConvHead(num_inputs, config.num_channels_per_group)
+            head = nn.Sequential(gc_head, head)
 
         self.head = head
 
@@ -152,7 +153,10 @@ class Network(nn.Module):
 
         # DEBUG
         # x = HybridHead.forward_via(self.head, x, hybrid_id)
-        x = self.head(x, hybrid_id)
+        if self.use_hybrid_head:
+            x = self.head(x, h=hybrid_id)
+        else:
+            x = self.head(x)
 
         return x
 

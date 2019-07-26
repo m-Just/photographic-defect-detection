@@ -25,7 +25,7 @@
 
 ## How to train
 `python train.py [--options]`  
-For example usages please look at `scripts`, and for an explanation of options
+For example usages please look at `scripts`, and for the explanation of options
 just run `python train.py -h`.
 
 ## How to evaluate
@@ -33,4 +33,4 @@ just run `python train.py -h`.
 
 ## Problems
 If you have any other problems,
-please submit an issue or contact [mjust.lkc@gmail.com](mjust.lkc@gmail.com).
+please submit an issue or contact [mjust.lkc@gmail.com](mailto:mjust.lkc@gmail.com).

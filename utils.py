@@ -56,8 +56,9 @@ class Loss:
         self.reduce_func = reduce_func
         self.reset_state()
 
-    def __repr__(self): # a shorthand for str(loss.value.reduce().detach())
-        return str(self.reduce().detach())
+    def __repr__(self): # a shorthand for printing readable loss value
+        loss_val = self.reduce().data.cpu().numpy()
+        return str(np.around(loss_val, decimals=4))
 
     def reset_state(self):
         self.reduced = self.reduce_func is None

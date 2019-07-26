@@ -1,6 +1,7 @@
 import os
 os.environ['CUDA_LAUNCH_BLOCKING'] = '1'    # for clearer CUDA debug message
 
+import numpy as np
 import torch.optim as optim
 
 from config import parse_train_args, parse_config
@@ -86,7 +87,7 @@ def main(config):
     print(f'Test dataloader: {len(test_dataloader)} batches/epoch, batch_size={config.test_batch_size}')
 
     log_dir = f'./{config.tb_log_dir}/{config.model_name}'
-    writer = TensorboardWriter(log_dir, get_defect_names_by_idx(selected_defects))
+    writer = TensorboardWriter(log_dir, get_defect_names_by_idx(config.selected_defects))
 
     # DEBUG
     # real_world_loader = get_ranking_dataloader(config)
@@ -107,8 +108,8 @@ def main(config):
 
             # DEBUG
             if at_interval(i, 50, start_index=0):
-                print('========= Model predicted scores ========')
-                print(wrap.scores[0])
+                print('========= Model prediction sample ========')
+                print(np.around(wrap.scores[0].data.cpu().numpy(), decimals=4))
 
             # runtime logging and evaluation
             if at_interval(i, config.val_interval, start_index=0):

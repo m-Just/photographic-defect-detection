@@ -78,7 +78,7 @@ class HybridHead(nn.Module):
 
 
 class GroupedConvHead(nn.Module):
-    def __init__(self, basic_head, num_inputs, num_outputs, num_channels_per_group):
+    def __init__(self, num_inputs, num_outputs, num_channels_per_group):
         super(GroupedConvHead, self).__init__()
         self.num_outputs = num_outputs
         self.ncpg = num_channels_per_group
@@ -97,25 +97,7 @@ class GroupedConvHead(nn.Module):
             nn.BatchNorm2d(total_ch),
             nn.ReLU())
 
-        for n in range(num_outputs):
-            setattr(self, f'fc_{n}', basic_head)
-            basic_head = copy.deepcopy(basic_head)
-        del basic_head  # remove the last unused duplicate
-
-    def forward(self, x, hybrid_id=None):
-        raise NotImplementedError()
-
+    def forward(self, x):
         x = self.conv(x)
-
-        x_group = []
-        for n in range(self.num_outputs):
-            x_input = x[:, n * self.ncpg : (n+1) * self.ncpg]
-            fc = getattr(self, f'fc_{n}')
-            # DEBUG
-            # _x = HybridHead.forward_via(fc, x_input, hybrid_id)
-            _x = fc(x_input, hybrid_id)
-
-            x_group.append(_x)
-        x = torch.squeeze(torch.stack(x_group, dim=1), dim=2)
-
+        raise NotImplementedError('Hybrid head not supported')
         return x
