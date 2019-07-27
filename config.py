@@ -102,14 +102,16 @@ def parse_eval_args():
     parser.add_argument('--config_file', type=str, default='config.json')
     parser.add_argument('--epoch', type=int, default=100)
     parser.add_argument('--test_img_dir', type=str,
-                        default='dataset/test', help='path to testing images')
+                        default='dataset/test', help='path to testing images for evaluating spearman ranking coefficient')
     parser.add_argument('--test_csv_file', type=str,
                         default='data/test/defect_testing_gt_new.csv', help='path to testing labels')
     parser.add_argument('--test_batch_size', type=int, default=32)
     parser.add_argument('--obj_img_dir', type=str,
-                        default='dataset/objective_testing_mod')
+                        default='dataset/objective_testing_mod',
+                        help='the directory to the objective testset')
     parser.add_argument('--sbj_img_dir', type=str,
-                        default='dataset/subjective_testing_public')
+                        default='dataset/subjective_testing_public',
+                        help='the directory to the subjective testset')
     parser.add_argument('--summary_version', type=int, default=1)
     parser.add_argument('--csv_save_dir', type=str, default='results')
 

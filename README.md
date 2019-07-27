@@ -29,7 +29,9 @@ For example usages please look at `scripts`, and for the explanation of options
 just run `python train.py -h`.
 
 ## How to evaluate
-`python eval.py [--options]`
+`python eval.py [--options]`  
+General usage: `python eval.py --model_name [model_name] --epoch 100 --use_averaged_weight --test_spearman --test_objective --test_subjective`
+(You may want to set the path to spearman, objective and subjective testing set properly before running the script)
 
 ## Problems
 If you have any other problems,

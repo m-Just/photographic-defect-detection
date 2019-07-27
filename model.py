@@ -65,11 +65,14 @@ class Network(nn.Module):
         print(f'Number of backbone output channels: {num_inputs}')
 
         # define intermediate layers between backbone and head
+        randinit_params = []
+
         self.neck = None
         if config.num_channels_per_group:
             self.neck = GroupedConvBlock(
                 num_inputs, len(config.selected_defects),
                 config.num_channels_per_group, config.gc_norm_type)
+            randinit_params.append(self.neck.parameters())
             num_inputs = config.num_channels_per_group
 
         # define prediction head
@@ -77,6 +80,7 @@ class Network(nn.Module):
         if config.num_hybrids:
             head = HybridHead(head, config.num_hybrids, config.hybrid_test_id)
         self.head = head
+        randinit_params.append(self.head.parameters())
 
         # restore model
         if config.load_pretrained:
@@ -90,7 +94,7 @@ class Network(nn.Module):
                 self.restore(self.backbone, self.pretrained_path,
                              err_handling=config.model_restore_err_handling)
                 self.pretrain_params = self.backbone.parameters()
-                self.randinit_params = chain(self.head.parameters(), self.neck.parameters())
+                self.randinit_params = chain(*randinit_params)
                 print('Successfully loading imagenet-pretrained model')
         else:
             self.pretrain_params = None

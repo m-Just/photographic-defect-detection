@@ -107,12 +107,13 @@ def main(config):
                 model.update_ema_weights()
 
             # DEBUG
-            if at_interval(i, 50, start_index=0):
-                print('========= Model prediction sample ========')
-                print(np.around(wrap.scores[0].data.cpu().numpy(), decimals=4))
+            # if at_interval(i, 50, start_index=0):
+            #     print('========= Model prediction sample ========')
+            #     print(np.around(wrap.scores[0].data.cpu().numpy(), decimals=4))
 
             # runtime logging and evaluation
             if at_interval(i, config.val_interval, start_index=0):
+                print(f'Epoch {epoch+1}/{config.epoches}, iteration {i}/{len(train_dataloader)}:')
                 print(wrap.loss_dict)
                 writer.add_loss_dict('train', wrap.loss_dict, num_steps)
 
