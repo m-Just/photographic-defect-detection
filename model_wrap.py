@@ -252,8 +252,9 @@ class SoftmaxClassificationModel(DefectDetection):
         Args:
             logits: the unnormalized outputs of the model.
         Returns:
-            outputs: a list of length=batch_size containing logits of shape
-            [batch_size, num_softmax_bins].
+            outputs: a list of length=self.num_outputs containing logits of shape
+            [batch_size, self.sat_num_softmax_bins] for bad saturation and
+            [batch_size, self.num_softmax_bins] for other defects.
         '''
         outputs = []
         num_pre_bins = 0
