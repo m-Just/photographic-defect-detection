@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+import types
 
 import torch
 import torch.nn as nn
@@ -10,18 +11,25 @@ from metric import compute_spearman_rank_corr
 __all__ = ['get_model_wrap']
 
 
-def get_model_wrap(config, model, optimizer, device):
+def get_model_wrap(config, model, optimizer, device, knowledge_model=None):
     required_args = (model, optimizer, len(config.selected_defects),
                      config.sat_idx, device)
     if config.logits_act_type == 'sigmoid':
-        wrap = RegressionModel(
-            *required_args, sat_loss_weight=config.sat_loss_weight)
+        BaseWrap = RegressionModel
+        kwargs = {'sat_loss_weight': config.sat_loss_weight}
     elif config.logits_act_type == 'softmax':
-        wrap = SoftmaxClassificationModel(
-            *required_args, num_softmax_bins=config.num_softmax_bins,
-            sat_num_softmax_bins=config.sat_num_softmax_bins)
+        BaseWrap = SoftmaxClassificationModel
+        kwargs = {'num_softmax_bins': config.num_softmax_bins,
+                  'sat_num_softmax_bins': config.sat_num_softmax_bins}
     else:
         raise ValueError()
+
+    if knowledge_model is None:
+        wrap = BaseWrap(*required_args, **kwargs)
+    else:
+        wrap = get_knowledge_distill_wrap(
+            BaseWrap, knowledge_model, config.kd_weight, *required_args, **kwargs)
+
     return wrap
 
 
@@ -81,7 +89,7 @@ class DefectDetection(ABC):
         pass
 
     @abstractmethod
-    def compute_loss(self, outputs, labels, loss_masks):
+    def compute_loss(self):
         pass
 
     @abstractmethod
@@ -117,7 +125,7 @@ class DefectDetection(ABC):
 
     def forward_and_compute_loss(self, data_batch):
         self.forward(data_batch)
-        self.compute_loss(self.outputs, self.labels, self.loss_masks)
+        self.compute_loss()
 
     def train(self, data_batch):
         self.forward_and_compute_loss(data_batch)
@@ -159,7 +167,7 @@ class DefectDetection(ABC):
                     raise ValueError('No labels to compute the loss. '
                                      + 'To avoid the computation, '
                                      + 'you can set gather_loss=False')
-                self.compute_loss(self.outputs, self.labels, self.loss_masks)
+                self.compute_loss()
                 for loss_name in self.loss_dict:
                     reduced_val = self.loss_dict[loss_name].reduce().detach()
                     loss_val_dict[loss_name].append(reduced_val)
@@ -196,11 +204,11 @@ class RegressionModel(DefectDetection):
                 outputs.append(logits[:, i].sigmoid())
         return torch.stack(outputs, dim=1).type_as(logits)
 
-    def compute_loss(self, outputs, labels, loss_masks):
-        outputs, sat_outputs = separate_by_index(outputs, self.sat_idx)
-        labels, sat_labels = separate_by_index(labels, self.sat_idx)
+    def compute_loss(self):
+        outputs, sat_outputs = separate_by_index(self.outputs, self.sat_idx)
+        labels, sat_labels = separate_by_index(self.labels, self.sat_idx)
         loss_masks, sat_loss_masks = separate_by_index(
-            loss_masks, self.sat_idx)
+            self.loss_masks, self.sat_idx)
 
         self.loss_dict['Bce'].compute(outputs, labels, loss_masks)
         self.loss_dict['Sat'].compute(sat_outputs, sat_labels, sat_loss_masks)
@@ -267,13 +275,13 @@ class SoftmaxClassificationModel(DefectDetection):
             num_pre_bins = num_cur_bins
         return outputs
 
-    def compute_loss(self, outputs, labels, loss_masks):
+    def compute_loss(self):
         softmax_labels = self.convert_to_softmax_labels(
-            labels, self.num_softmax_bins, self.sat_num_softmax_bins, self.sat_idx)
+            self.labels, self.num_softmax_bins, self.sat_num_softmax_bins, self.sat_idx)
         self.loss_dict['CE'].reset_state()
-        for i in range(len(outputs)):
+        for i in range(len(self.outputs)):
             self.loss_dict['CE'].accumulate(
-                outputs[i], softmax_labels[:, i], loss_masks[:, i])
+                self.outputs[i], softmax_labels[:, i], self.loss_masks[:, i])
 
     def convert_output_to_score(self, outputs):
         ''' Convert the outputs used for loss computation to the final score.
@@ -302,3 +310,48 @@ class SoftmaxClassificationModel(DefectDetection):
         scores = torch.cat(scores, dim=1)
 
         return scores
+
+
+# knowledge distilling class factory
+def get_knowledge_distill_wrap(BaseWrap, knowledge_model, kd_weight,
+                               *args, **kwargs):
+    # set the knowledge model to inference only mode
+    knowledge_model.eval()
+    for p in knowledge_model.parameters():
+        p.requires_grad = False
+
+    # dynamic creation of class
+    class_ = type('KnowledgeDistillModel', (BaseWrap,), {})
+
+    # ------------------------------ Properties -------------------------------
+    def fmaps_t(self):  # the feature maps of the training model
+        return self._fmaps_t
+    class_.fmaps_t = property(fmaps_t)
+
+    def fmaps_k(self):  # the feature maps of the knowledge model
+        return self._fmaps_k
+    class_.fmaps_k = property(fmaps_k)
+    # -------------------------------------------------------------------------
+
+    # instantiate
+    wrap = class_(*args, **kwargs)
+
+    # add distillation loss
+    wrap.loss_dict['KD'] = Loss(nn.MSELoss(), weight=kd_weight)
+
+    # -------------------------- Overridden methods ---------------------------
+    def forward(self, data_batch):
+        super(wrap.__class__, self).forward(data_batch)
+        self._fmaps_t = self.model.backbone.forward_kd(self.inputs[0])
+        self._fmaps_k = knowledge_model.backbone.forward_kd(self.inputs[0])
+    wrap.forward = types.MethodType(forward, wrap)
+
+    def compute_loss(self):
+        super(wrap.__class__, self).compute_loss()
+        self.loss_dict['KD'].reset_state()
+        for fmap_t, fmap_k in zip(self.fmaps_t, self.fmaps_k):
+            self.loss_dict['KD'].accumulate(fmap_t, fmap_k)
+    wrap.compute_loss = types.MethodType(compute_loss, wrap)
+    # -------------------------------------------------------------------------
+
+    return wrap

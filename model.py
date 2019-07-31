@@ -12,7 +12,7 @@ from networks.backbone.resnet import resnet
 from networks.pred_heads import SimpleLinearHead, SeparatedHead
 from networks.pred_heads import HybridHead
 from networks.building_blocks import GroupedConvBlock
-from utils import ema_over_state_dict
+from utils import ema_over_state_dict, config_override
 
 __all__ = ['Network']
 
@@ -41,6 +41,7 @@ def get_heads_by_defect(config, num_inputs):
 
 
 class Network(nn.Module):
+    @config_override
     def __init__(self, config):
         super(Network, self).__init__()
         self.global_pooling_mode = config.global_pooling_mode
@@ -48,9 +49,7 @@ class Network(nn.Module):
         # define backbone network
         if config.net_type == 'shufflenet':
             self.backbone = shufflenet(
-                groups=config.groups,
-                global_pooling_mode=config.global_pooling_mode,
-                trunc_stage=config.trunc_stage)
+                groups=config.groups, trunc_stage=config.trunc_stage)
             self.pretrained_path = 'pretrained/shufflenet.pth.tar'
         elif config.net_type == 'shufflenet_v2':
             self.backbone = shufflenet_v2(config.width_mult)

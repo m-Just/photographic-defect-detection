@@ -33,16 +33,19 @@ just run `python train.py -h`.
 General usage: `python eval.py --model_name [model_name] --epoch 100 --use_averaged_weight --test_spearman --test_objective --test_subjective`
 (You may want to set the path to spearman, objective and subjective testing set properly before running the script)
 
+The summary scores are saved to `./results` by default, and detailed reports
+are saved to `./reports`.
+
 ## Problems
 The project is still under construction. Future plans include:
-- Conv-BN fusion
-- knowledge distilling
-- weighted loss
-- data augmentation
-- learning with confidence
-- mean teacher
-- better logging system
-- add more comments
+- [x] Conv-BN fusion
+- [x] knowledge distilling
+- [ ] weighted loss
+- [ ] data augmentation
+- [ ] learning with confidence
+- [ ] mean teacher
+- [ ] better logging system
+- [ ] add more comments
 
 If you have any other problems,
 please submit an issue or contact [mjust.lkc@gmail.com](mailto:mjust.lkc@gmail.com).

@@ -119,11 +119,12 @@ class ShuffleUnit(nn.Module):
 
 
 class ShuffleNet(nn.Module):
-    def __init__(self, groups=8, in_channels=3, global_pooling_mode='average',
-                 trunc_stage=False, reduce_channel=None):
+    def __init__(self, groups=8, in_channels=3, trunc_stage=False,
+                 reduce_channel=None):
         super(ShuffleNet, self).__init__()
         self.groups = groups
-        if trunc_stage:
+        self.trunc_stage = trunc_stage
+        if self.trunc_stage:
             self.stage_repeats = [3, 3]
         else:
             self.stage_repeats = [3, 7, 3]
@@ -161,7 +162,7 @@ class ShuffleNet(nn.Module):
         self.stage3 = self._make_stage(3)
 
         # Stage 4
-        if trunc_stage:
+        if self.trunc_stage:
             self.stage4 = None
             self.num_output_channels = self.stage_out_channels[3]
         else:
@@ -225,6 +226,17 @@ class ShuffleNet(nn.Module):
         if self.stage4 is not None:
             x = self.stage4(x)
         return x
+
+    def forward_kd(self, x):
+        outputs = []
+        x = self.conv1(x)
+        x = self.maxpool(x)
+        outputs.append(x)
+        st = 4 if self.trunc_stage else 5
+        for i in range(2, st):
+            x = getattr(self, f'stage{i}')(x)
+            outputs.append(x)
+        return outputs
 
 
 def shufflenet(**kwargs):

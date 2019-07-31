@@ -42,7 +42,7 @@ class SeparatedHead(nn.Module):
         x_list = []
         for i in range(self.num_outputs):
             head = getattr(self, f'output_{i}')
-            x_ = head(x[:, i] if x.dim() == 3 else x)   # TODO
+            x_ = head(x[:, i] if x.dim() == 3 else x)
             x_list.append(x_)
             assert x_.dim() == 2
         return torch.cat(x_list, dim=1)
@@ -65,7 +65,9 @@ class HybridHead(nn.Module):
         super(HybridHead, self).__init__()
         self.constant_id = constant_id
 
-        if not isinstance(basic_head, nn.Module) or num_hybrids < 2:
+        if not isinstance(basic_head, nn.Module):
+            raise TypeError()
+        if num_hybrids < 2:
             raise ValueError()
 
         for h in range(num_hybrids):

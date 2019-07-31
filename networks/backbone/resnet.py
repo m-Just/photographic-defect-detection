@@ -179,6 +179,9 @@ class ResNet(nn.Module):
 
         return x
 
+    def forward_kd(self, x):
+        raise NotImplementedError()
+
 
 def resnet(num_layers, **kwargs):
     if num_layers == 18:

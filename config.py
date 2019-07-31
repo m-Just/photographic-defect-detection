@@ -77,6 +77,10 @@ def parse_train_args():
     parser.add_argument('--lr_decay_rate', type=float, default=0.95, help='exponential decay rate')
     parser.add_argument('--lr_decay_min', type=float, default=0, help='minimum learning rate of decay')
 
+    # knowledge distillation
+    parser.add_argument('--use_kd', action='store_true', help='whether to use knowledge distillation')
+    parser.add_argument('--kd_weight', type=float, default=1.0, help='weight for the knowledge distilling loss')
+
     # others
     parser.add_argument('--val_interval', type=int, default=50, help='number of iterations between every runtime validation')
     parser.add_argument('--ckpt_interval', type=int, default=10, help='number of epoches between every checkpoint saving')
@@ -84,11 +88,6 @@ def parse_train_args():
     parser.add_argument('--tb_log_dir', type=str, default='runs', help='root directory to save the tensorboard records')
     parser.add_argument('--print_network', action='store_true', help='whether to print out network architecture, useful for debugging')
     parser.add_argument('--save_input_images', action='store_true', help='whether to show sampled input images on tensorboard')
-
-    # DEBUG
-    parser.add_argument('--try_deep_shallow_network', action='store_true')
-    parser.add_argument('--normalize_head', action='store_true')
-    parser.add_argument('--siamese_init', action='store_true')
 
     return Config(vars(parser.parse_args()))
 
@@ -122,13 +121,14 @@ def parse_eval_args():
     parser.add_argument('--use_ema_model', action='store_true')
     parser.add_argument('--use_averaged_weight', action='store_true')
     parser.add_argument('--record_suffix', type=str, default='')
+    parser.add_argument('--fuse_conv_bn', action='store_true')
+    parser.add_argument('--print_network', action='store_true')
 
     # override arguments (which will replace the settings in training config)
     parser.add_argument('--num_workers', type=int, default=8)
     parser.add_argument('--hybrid_test_id', type=int, default=-1, help='which of the hybrid heads should be used at testing time')
 
     # DEBUG
-    parser.add_argument('--print_network', action='store_true')
     parser.add_argument('--use_bilinear_fast_resize', action='store_true')
 
     return Config(vars(parser.parse_args()))
@@ -157,6 +157,8 @@ def parse_config(config):
         config.num_hybrids = len(config.hybrid_dataset)
 
         assert config.hybrid_test_id < config.num_hybrids
+    else:
+        config.num_hybrids = 0
 
     print(config)
     return config

@@ -50,6 +50,9 @@ class ShuffleNetV2(nn.Module):
         x = self.conv5(x)
         return x
 
+    def forward_kd(self, x):
+        raise NotImplementedError()
+
 
 def shufflenet_v2(width_mult, **kwargs):
     if width_mult == 0.5:

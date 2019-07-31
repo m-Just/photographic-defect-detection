@@ -7,13 +7,13 @@ from auto_test_and_gen_report import auto_test_and_gen_from_model
 
 def get_score_summary(scores, version):
     if version == 1:
-        func = summary_v1
+        func = _summary_v1
     else:
         raise ValueError(f'Score summary version {version} not found.')
     return func(scores)
 
 
-def summary_v1(scores):
+def _summary_v1(scores):
     """ 综合得分计算公式
     result =  0.1120*(1-Math.pow(exposure,1.2))+ \
               0.1179*(1-Math.pow(Math.abs(saturation+0.06),1.2))+ \
@@ -49,9 +49,11 @@ def compute_ranking_accuracy(config, score_dict, mode, summary_version=None):
 
 
 def compute_spearman_rank_corr(score_dict, label_dict, num_defects, sat_idx):
-    score_list = [[]] * num_defects
-    label_list = [[]] * num_defects
-    for img_path in score_dict:
+    score_list = [[] for _ in range(num_defects)]
+    label_list = [[] for _ in range(num_defects)]
+    # NOTE: do not use [[]] * num_defects, which copies the same list object
+
+    for n, img_path in enumerate(score_dict):
         for i in range(num_defects):
             score_list[i].append(score_dict[img_path][i])
             label_list[i].append(label_dict[img_path][i])
@@ -63,6 +65,7 @@ def compute_spearman_rank_corr(score_dict, label_dict, num_defects, sat_idx):
     for d in range(num_defects):
         y = np.array(score_list[d])
         t = np.array(label_list[d])
+
         bins = hist_bin_saturation if d == sat_idx else hist_bin
         hist = np.histogram(t, bins=bins)[0]
 
@@ -82,8 +85,8 @@ def compute_spearman_rank_corr(score_dict, label_dict, num_defects, sat_idx):
         samples_list = []
         for i in range(num_samples):
             idx_samples = idx_samples_array[i, :]
-            t_samples = t[idx_samples]
             y_samples = y[idx_samples]
+            t_samples = t[idx_samples]
             [correlation_samples, p_value] = spearmanr(t_samples, y_samples)
             samples_list.append(correlation_samples)
         rho = np.mean(np.array(samples_list))

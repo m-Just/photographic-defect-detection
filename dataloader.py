@@ -6,12 +6,14 @@ from dataset import TrainSet, TestSet, HybridSet
 from dataset import get_transform_params
 
 
-def get_dataloader(dataset, balance_data, batch_size, num_workers):
+def get_dataloader(dataset, balance_data, batch_size, num_workers, shuffle=True):
     if balance_data:
         weights = dataset.get_data_weights(balance_data)
         sampler_ = sampler.WeightedRandomSampler(weights, len(weights))
-    else:
+    elif shuffle:
         sampler_ = sampler.RandomSampler(dataset)
+    else:
+        sampler_ = None
     dataloader = torch.utils.data.DataLoader(
         dataset, batch_size=batch_size, sampler=sampler_,
         num_workers=num_workers)
@@ -34,7 +36,8 @@ def get_train_dataloader(config):
         dataset = TrainSet(config.train_img_dir, config.train_csv_file,
                            config.selected_defects, transform_params)
     dataloader = get_dataloader(dataset, config.balance_data,
-                                config.train_batch_size, config.num_workers)
+                                config.train_batch_size, config.num_workers,
+                                shuffle=True)
     return dataloader
 
 
@@ -44,7 +47,7 @@ def get_test_dataloader(config):
     dataset = TestSet(config.test_img_dir, config.test_csv_file,
                       config.selected_defects, transform_params)
     dataloader = get_dataloader(dataset, 0, config.test_batch_size,
-                                config.num_workers)
+                                config.num_workers, shuffle=False)
     return dataloader
 
 

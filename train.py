@@ -48,24 +48,7 @@ def apply_lr_schedule(optimizer, lr_decay_rate, lr_decay_min):
 def main(config):
     device = determine_device()
 
-    # DEBUG
-    if config.try_deep_shallow_network:
-        import copy
-        deep_config = copy.deepcopy(config)
-        deep_config.trunc_stage = False
-        deep_net = Network(deep_config)
-
-        if config.siamese_init:
-            shallow_config = copy.deepcopy(deep_config)
-        else:
-            shallow_config = copy.deepcopy(config)
-            shallow_config.trunc_stage = True
-        shallow_net = Network(shallow_config)
-
-        model = DeepShallowNetwork(config, deep_net, shallow_net)
-    else:
-        model = Network(config)
-
+    model = Network(config)
     model.train()
     model = model.to(device)
     if config.print_network:
@@ -78,7 +61,13 @@ def main(config):
         scheduler = apply_lr_schedule(
             optimizer, config.lr_decay_rate, config.lr_decay_min)
 
-    wrap = get_model_wrap(config, model, optimizer, device)
+    if config.use_kd:
+        knowledge_model = Network(config, load_pretrained=True, ckpt_path='')
+        knowledge_model = knowledge_model.to(device)
+    else:
+        knowledge_model = None
+    wrap = get_model_wrap(config, model, optimizer, device,
+                          knowledge_model=knowledge_model)
 
     train_dataloader = get_train_dataloader(config)
     test_dataloader = get_test_dataloader(config)

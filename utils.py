@@ -1,4 +1,5 @@
 import csv
+import functools
 import glob
 from collections.abc import Iterable
 import json
@@ -24,6 +25,8 @@ class Config(edict):
             self.load(init)
         elif isinstance(init, dict):
             self.update(init)
+        else:
+            raise TypeError()
 
     def clear(self):
         for k in self:
@@ -65,15 +68,19 @@ class Loss:
         self.unweighted_value = None
         self.value = None
 
-    def compute(self, y, t, loss_mask, **kwargs):
+    def compute(self, y, t, loss_mask=None, **kwargs):
         self.reset_state()
-        self.unweighted_value = self.loss_func(y, t, **kwargs) * loss_mask
+        self.unweighted_value = self.loss_func(y, t, **kwargs)
+        if loss_mask is not None:
+            self.unweighted_value *= loss_mask
         self.value = self.weight * self.unweighted_value
         assert self.value.grad_fn
         return self.value
 
-    def accumulate(self, y, t, loss_mask, **kwargs):
-        loss_val = self.loss_func(y, t, **kwargs) * loss_mask
+    def accumulate(self, y, t, loss_mask=None, **kwargs):
+        loss_val = self.loss_func(y, t, **kwargs)
+        if loss_mask is not None:
+            loss_val *= loss_mask
         assert loss_val.grad_fn
         if self.unweighted_value is None:
             self.unweighted_value = loss_val
@@ -92,9 +99,7 @@ class Loss:
         return value
 
     def reduce_(self):
-        if self.reduced:
-            raise RuntimeError()
-        else:
+        if not self.reduced:
             self.unweighted_value = self.reduce_func(self.unweighted_value)
             self.value = self.weight * self.unweighted_value
             self.reduced = True
@@ -243,10 +248,7 @@ def separate_by_index(array, sat_idx):
     elif isinstance(array, Iterable):
         raise NotImplementedError()
     else:
-        raise ValueError()
-
-
-# TODO cat_by_index
+        raise TypeError()
 
 
 def makedirs_if_not_exists(dir):
@@ -315,21 +317,25 @@ def ema_over_state_dict(ema_state_dict, state_dict, alpha):
 def avg_over_state_dict(ckpt_paths):
     def load_ckpt(path):
         _state_dict = torch.load(path)
-        print('Successfully loaded model ' + path)
+        print(f'Successfully loaded model {path}')
         return _state_dict
-
-    avg_state_dict = load_ckpt(ckpt_paths[0])
-    for ckpt_path in ckpt_paths[1:]:
-        state_dict = load_ckpt(ckpt_path)
-        for key in avg_state_dict.keys():
-            avg_state_dict[key] += state_dict[key]
-
-    for key in avg_state_dict.keys():
-        avg_state_dict[key] /= len(ckpt_paths)
 
     ckpt_root, _ = os.path.split(ckpt_paths[0])
     avg_ckpt_path = f'{ckpt_root}/weight_averaged.pkl'
-    torch.save(avg_state_dict, avg_ckpt_path)
+    if os.path.isfile(avg_ckpt_path):
+        print('Found existing averaged model checkpoint')
+        avg_state_dict = torch.load(avg_ckpt_path)
+    else:
+        avg_state_dict = load_ckpt(ckpt_paths[0])
+        for ckpt_path in ckpt_paths[1:]:
+            state_dict = load_ckpt(ckpt_path)
+            for key in avg_state_dict.keys():
+                avg_state_dict[key] += state_dict[key]
+
+        for key in avg_state_dict.keys():
+            avg_state_dict[key] /= len(ckpt_paths)
+
+        torch.save(avg_state_dict, avg_ckpt_path)
 
     return avg_state_dict, avg_ckpt_path
 
@@ -337,6 +343,7 @@ def avg_over_state_dict(ckpt_paths):
 # --------------------------------- Decorators ---------------------------------
 
 def no_grad(func):
+    @functools.wraps(func)
     def wrapper(*args, **kwargs):
         with torch.no_grad():
             result = func(*args, **kwargs)
@@ -346,6 +353,7 @@ def no_grad(func):
 
 @no_grad
 def eval_mode(func):
+    @functools.wraps(func)
     def wrapper(*args, **kwargs):
         model = args[0] if isinstance(args[0], nn.Module) else args[0].model
         training = model.training
@@ -357,14 +365,20 @@ def eval_mode(func):
 
 
 def config_override(func):
-    def wrapper(config, *args, **kwargs):
-        config = config.copy()
-        config.update(kwargs)
-        return func(config, *args)
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        new_args = []
+        for i, arg in enumerate(args):
+            if isinstance(arg, Config):
+                arg = arg.copy()
+                arg.update(kwargs)
+            new_args.append(arg)
+        return func(*new_args)
     return wrapper
 
 
 def overrides(interface_class):
+    @functools.wraps(interface_class)
     def overrider(method):
         assert(method.__name__ in dir(interface_class))
         return method

@@ -33,7 +33,7 @@ def pil_image_in_ndarray(func):
 
 def get_resize_func(min_size, max_size, mode, backend):
     if not isinstance(min_size, int) or not isinstance(max_size, int):
-        raise ValueError()
+        raise TypeError()
 
     if min_size == max_size:
         def get_size(): return min_size
@@ -70,7 +70,8 @@ def get_transform_params(config, mode):
             'resize_mode': config.resize_mode,
             'resize_backend': config.resize_backend,
             'crop_size': config.crop_size,
-            'crop_method': config.crop_method
+            'crop_method': config.crop_method,
+            'h_flip': True
         }
     elif mode == 'test':
         transform_params = {
@@ -78,7 +79,8 @@ def get_transform_params(config, mode):
             'resize_mode': config.resize_mode,
             'resize_backend': config.resize_backend,
             'crop_size': config.crop_size,
-            'crop_method': 'center'
+            'crop_method': 'center',
+            'h_flip': False
         }
     else:
         raise ValueError()
@@ -116,7 +118,8 @@ class DatasetFrame(data.Dataset):
         return img, self.image_files[idx]
 
     @staticmethod
-    def get_transform(input_size, resize_mode, resize_backend, crop_size, crop_method):
+    def get_transform(input_size, resize_mode, resize_backend, crop_size,
+                      crop_method, h_flip):
         transform = []
 
         if crop_size == input_size:
@@ -150,7 +153,8 @@ class DatasetFrame(data.Dataset):
         if crop_func is not None:
             transform.append(crop_func)
 
-        transform.append(transforms.RandomHorizontalFlip())
+        if h_flip:
+            transform.append(transforms.RandomHorizontalFlip())
         transform.append(transforms.ToTensor())
 
         return transforms.Compose(transform)
@@ -339,7 +343,7 @@ class DynamicHybridSet(data.Dataset):
                     raise KeyError()
             self.visible_names = names
         else:
-            raise ValueError()
+            raise TypeError()
 
         self.end_idx = dict()
         last_end_idx = 0

@@ -1,13 +1,62 @@
 import argparse
 
+import torch
+import torch.nn as nn
+
 from model import Network
 from model_wrap import get_model_wrap
+from networks.building_blocks import DummyModule
 from dataloader import get_test_dataloader
 from utils import Config, CSV_Writer
 from utils import avg_over_state_dict, determine_device, get_defect_names_by_idx
 from utils import makedirs_if_not_exists
 from config import parse_eval_args, parse_config
 from metric import compute_ranking_accuracy
+
+
+def fuse(conv, bn):
+    w = conv.weight
+    mean = bn.running_mean
+    var_sqrt = torch.sqrt(bn.running_var + bn.eps)
+
+    beta = bn.weight
+    gamma = bn.bias
+
+    if conv.bias is not None:
+        b = conv.bias
+    else:
+        b = mean.new_zeros(mean.shape)
+
+    w = w * (beta / var_sqrt).reshape([conv.out_channels, 1, 1, 1])
+    b = (b - mean)/var_sqrt * beta + gamma
+
+    fused_conv = nn.Conv2d(conv.in_channels,
+                           conv.out_channels,
+                           conv.kernel_size,
+                           conv.stride,
+                           conv.padding,
+                           groups=conv.groups,
+                           bias=True)
+    fused_conv.weight = nn.Parameter(w)
+    fused_conv.bias = nn.Parameter(b)
+    return fused_conv
+
+
+def fuse_conv_bn(m):
+    children = list(m.named_children())
+    c = None
+    cn = None
+    for name, child in children:
+        if isinstance(child, nn.BatchNorm2d):
+            bc = fuse(c, child)
+            m._modules[cn] = bc
+            m._modules[name] = DummyModule()
+            c = None
+        elif isinstance(child, nn.Conv2d):
+            c = child
+            cn = name
+        else:
+            fuse_conv_bn(child)
 
 
 def write_spearman_to_csv(corr, selected_defects, model_name, save_dir):
@@ -33,16 +82,21 @@ def main(config):
         ckpt_paths = []
         for i in range(config.num_final_ckpts):
             ckpt_path = Network.get_ckpt_path(
-                model_root, config.epoch - i, config.use_ema_model)
+                model_root, config.epoch - i, ema=config.use_ema_model)
             ckpt_paths.append(ckpt_path)
         _, config.ckpt_path = avg_over_state_dict(ckpt_paths)
     else:
         config.ckpt_path = Network.get_ckpt_path(
-            model_root, config.epoch, config.use_ema_model)
+            model_root, config.epoch, ema=config.use_ema_model)
 
     model = Network(config)
+    if config.fuse_conv_bn:
+        fuse_conv_bn(model)
+        Network.save(model.state_dict(), f'{config.ckpt_path[:-4]}_fused.pkl')
     model.eval()
     model = model.to(device)
+    if config.print_network:
+        print(model)
 
     wrap = get_model_wrap(config, model, None, device)
 
@@ -50,6 +104,8 @@ def main(config):
     record_name += f'_epoch{config.epoch}'
     if config.use_ema_model:
         record_name += '_ema'
+    if config.fuse_conv_bn:
+        record_name += '_fused'
     if config.record_suffix:
         record_name += f'_{config.record_suffix}'
 

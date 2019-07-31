@@ -45,6 +45,14 @@ def channel_shuffle(x, groups):
     return x
 
 
+class DummyModule(nn.Module):
+    def __init__(self):
+        super(DummyModule, self).__init__()
+
+    def forward(self, x):
+        return x
+
+
 class InvertedResidual(nn.Module):
     def __init__(self, inp, oup, stride):
         super(InvertedResidual, self).__init__()
