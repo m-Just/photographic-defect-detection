@@ -76,7 +76,7 @@ class HybridHead(nn.Module):
         del basic_head  # remove the last unused duplicate
 
     def forward(self, x, h=None):
-        if self.constant_id is not None:
+        if h is None and isinstance(self.constant_id, int):
             h = [self.constant_id] * x.size(0)
 
         x_list = []
