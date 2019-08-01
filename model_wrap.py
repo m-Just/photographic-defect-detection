@@ -30,33 +30,32 @@ def get_model_wrap(config, model, optimizer, status_dict, device):
 
     # additional model wraps
     if config.use_kd:
+        print('======== Creating knowledge model ========')
         knowledge_model = Network(config, load_pretrained=True, ckpt_path='')
         knowledge_model = knowledge_model.to(device)
-
-        # set the knowledge model to inference only mode
         knowledge_model.eval()
         for p in knowledge_model.parameters():
             p.requires_grad = False
+        print('==========================================')
 
         Wrap = get_knowledge_distill_wrap(
             Wrap, knowledge_model, config.kd_loss_weight)
 
     if config.use_mean_teacher:
-        print('======== Creating teacher model ========')
-        teacher_model = Network(config).to(device)  # TODO: copy directly
+        print('========= Creating teacher model =========')
+        teacher_model = Network(config)  # TODO: copy directly
+        teacher_model = teacher_model.to(device)
         teacher_model.train()
         for p in teacher_model.parameters():
             p.requires_grad = False
-        print('========================================')
+        print('==========================================')
         unlabeled_dataloader = get_unlabeled_dataloader(config)
         unlabeled_dataflow = DataFlow(unlabeled_dataloader)
         Wrap = get_mean_teacher_wrap(
             Wrap, model, teacher_model, unlabeled_dataflow, config.cst_loss_weight,
             config.rampup_length, config.teacher_ema_alpha, status_dict)
 
-    # DEBUG
     # print(Wrap.__mro__)
-
     wrap = Wrap(*required_args, **kwargs)
 
     return wrap
