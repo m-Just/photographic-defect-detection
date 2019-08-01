@@ -4,9 +4,12 @@ from collections.abc import Iterable
 
 import cv2
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageFile
+ImageFile.LOAD_TRUNCATED_IMAGES = True
 from torch.utils import data
 import torchvision.transforms as transforms
+import torchvision.transforms.functional as TF
+from scipy.ndimage import gaussian_filter
 
 from utils import select_by_indices, get_images_recursively
 
@@ -89,10 +92,12 @@ def get_transform_params(config, mode):
 
 class DatasetFrame(data.Dataset):
     def __init__(self, img_dir, csv_file, selected_defects, transform_params,
-                 label_parsing_func=None):
+                 std_csv_file=None, use_augmentation=False):
         self.img_dir = img_dir
         self.selected_defects = selected_defects
+        self.transform_params = transform_params
         self.transform = self.get_transform(**transform_params)
+        self.use_augmentation = use_augmentation
 
         self.image_paths = get_images_recursively(img_dir)
         self.image_files = [p.split('/')[-1] for p in self.image_paths]
@@ -100,10 +105,14 @@ class DatasetFrame(data.Dataset):
         if csv_file:
             self.annos = read_annos(csv_file)
             self.annos = select_by_indices(self.annos, selected_defects, dim=0)
-            if label_parsing_func:
-                self.annos = {k: label_parsing_func(v) for k, v in self.annos.items()}
         else:
             self.annos = None
+
+        if std_csv_file:
+            self.stds = read_annos(std_csv_file)
+            self.stds = select_by_indices(self.stds, selected_defects, dim=0)
+        else:
+            self.stds = None
 
     def __len__(self):
         return len(self.image_files)
@@ -114,8 +123,16 @@ class DatasetFrame(data.Dataset):
     def load_img(self, idx):
         img_path = self.image_paths[idx]
         img = Image.open(img_path).convert(mode='RGB')
+        if self.use_augmentation:
+            img, loss_mask = DatasetFrame.apply_random_augmentation(
+                img, self.transform_params['input_size'])
+            loss_mask = select_by_indices(loss_mask, self.selected_defects, dim=0)
+        else:
+            loss_mask = [1] * len(self.selected_defects)
+        loss_mask = np.array(loss_mask, dtype=np.float32)
+
         img = self.transform(img)
-        return img, self.image_files[idx]
+        return img, self.image_files[idx], loss_mask
 
     @staticmethod
     def get_transform(input_size, resize_mode, resize_backend, crop_size,
@@ -159,12 +176,93 @@ class DatasetFrame(data.Dataset):
 
         return transforms.Compose(transform)
 
+    @staticmethod
+    def apply_random_augmentation(image, input_size, augs=[0, 1, 2, 3, 4, 5, 6]):
+        def get_random_range(minval, maxval):
+            return np.random.rand(1) * (maxval - minval) + minval
+
+        choice = np.random.choice(augs, 1)[0]
+
+        if choice == 0:     # saturation
+            factor = np.random.choice([0, 0.6, 0.7, 1.3, 1.4], 1,
+                                      p=[0.1, 0.15, 0.3, 0.3, 0.15])[0]
+            image = TF.adjust_saturation(image, factor)
+            loss_mask = [1, 0, 0, 0, 1, 1, 1]
+
+        elif choice == 1:   # rotation
+            angle = np.random.rand(1) * 30 - 15
+            image = TF.rotate(image, angle, resample=Image.BILINEAR)
+            loss_mask = [0, 1, 1, 1, 1, 0, 0]
+
+        elif choice == 2:   # resized crop
+            scale = [0.6, 1.0]
+            aspect_ratio = [3./4, 4./3]
+            i, j, h, w = transforms.RandomResizedCrop.get_params(image, scale, aspect_ratio)
+            image = TF.resized_crop(image, i, j, h, w,
+                size=(input_size, input_size), interpolation=2) # bilinear
+            loss_mask = [1, 1, 1, 1, 1, 1, 0]
+
+        elif choice == 3:   # brightness
+            if np.random.rand(1) > 0.5:
+                factor = get_random_range(0.8, 1.2)
+                image = TF.adjust_brightness(image, factor)
+                loss_mask = [0, 1, 1, 0, 1, 1, 1]
+            else:
+                gamma = np.random.choice([1/1.2, 1.2], 1)[0]
+                image = TF.adjust_gamma(image, gamma)
+                loss_mask = [0, 1, 0, 0, 0, 1, 1]
+
+        elif choice == 4:   # noise
+            sigma = get_random_range(0.8, 2.)
+            image = DatasetFrame.apply_gaussian_noise(image, sigma)
+            loss_mask = [1, 1, 1, 0, 1, 1, 1]
+
+        elif choice == 5:   # blur
+            sigma = get_random_range(1.4, 2.0)
+            image = DatasetFrame.apply_gaussian_blur(image, sigma)
+            loss_mask = [1, 1, 1, 0, 1, 0, 1]
+
+        elif choice == 6:   # white balance
+            hue_factor = get_random_range(-0.25, 0.25)
+            image = TF.adjust_hue(image, hue_factor)
+            loss_mask = [1, 0, 1, 1, 1, 1, 1]
+
+        return image, loss_mask
+
+    @staticmethod
+    def apply_gaussian_noise(image, sigma, mult=10.):
+        '''
+        Args:
+            image: a PIL format image.
+            sigma: the standard deviation of the normal distribution used for
+                   noise sampling, of which the value should be within [0, +inf).
+            mult: a multiplier to the magnitude of noise.
+        Returns:
+            The augmented image in PIL format.
+        '''
+        np_image = np.asarray(image, dtype=np.float32)
+        np_image += np.random.normal(scale=sigma, size=np_image.shape) * mult
+        np_image = np.clip(np_image, 0., 255.)
+        return Image.fromarray(np.round(np_image).astype(np.uint8))
+
+    @staticmethod
+    def apply_gaussian_blur(image, sigma):
+        '''
+        Args:
+            image: a PIL format image.
+            sigma: the standard deviation for Gaussian kernel.
+        Returns:
+            The augmented image in PIL format.
+        '''
+        np_image = np.asarray(image, dtype=np.float32)
+        np_image = gaussian_filter(np_image, sigma=[sigma, sigma, 0])
+        return Image.fromarray(np.round(np_image).astype(np.uint8))
+
 
 class TrainSet(DatasetFrame):
     def __getitem__(self, idx):
-        img, img_file = self.load_img(idx)
+        img, img_file, loss_mask = self.load_img(idx)
         annotation = self.annos[img_file]
-        loss_mask = np.ones(len(self.selected_defects), dtype=np.float32)
 
         data_dict = {
             'image': img,
@@ -172,6 +270,11 @@ class TrainSet(DatasetFrame):
             'loss_mask': loss_mask,
             'img_path': self.image_paths[idx]
         }
+
+        if self.stds is not None:
+            data_dict['std'] = self.stds[img_file]
+        else:
+            data_dict['std'] = np.zeros(len(self.selected_defects), dtype=np.float32)
 
         return data_dict
 
@@ -212,8 +315,7 @@ class TrainSet(DatasetFrame):
 
 class TestSet(DatasetFrame):
     def __getitem__(self, idx):
-        img, img_file = self.load_img(idx)
-        loss_mask = np.ones(len(self.selected_defects), dtype=np.float32)
+        img, img_file, loss_mask = self.load_img(idx)
 
         data_dict = {
             'image': img,
@@ -223,6 +325,11 @@ class TestSet(DatasetFrame):
 
         if self.annos is not None:
             data_dict['label'] = self.annos[img_file]
+
+        if self.stds is not None:
+            data_dict['std'] = self.stds[img_file]
+        else:
+            data_dict['std'] = np.zeros(len(self.selected_defects), dtype=np.float32)
 
         return data_dict
 
@@ -256,100 +363,3 @@ class HybridSet(data.Dataset):
         for id, dataset in enumerate(self.datasets):
             weights += dataset.get_data_weights(version)
         return weights
-
-
-class DynamicHybridSet(data.Dataset):
-    def __init__(self, BaseDataset, dataset_params):
-        self.num_datasets = len(dataset_params)
-        self.dataset_params = dataset_params
-        self.datasets = OrderedDict()
-
-        for name, params in self.dataset_params.items():
-            self.datasets[name] = BaseDataset(**params)
-
-        self.all_names = list(self.datasets.keys())
-        self.hybrid_stream()
-
-    def __len__(self):
-        return sum([len(self.datasets[n]) for n in self.visible_names])
-
-    def __getitem__(self, idx):
-        for name in self.visible_names:
-            if idx < self.end_idx[name]:
-                break
-        dataset = self.datasets[name]
-        data_dict = dataset.__getitem__(idx - self.end_idx[name])
-        data_dict['hybrid_dataset_name'] = name
-        data_dict['hybrid_id'] = self.all_names.index(name)
-        return data_dict
-
-    def __iter__(self):
-        for name in self.all_names:
-            yield self.datasets[name]
-
-    # def get_data_weights(self):
-    #     hybrid_weights = []
-    #     for name in self.visible_names:
-    #         weights = self.datasets[name].get_data_weights()
-    #         hybrid_weights.extend(weights)
-    #     return hybrid_weights
-    #
-    # def get_data_weights_v2(self):
-    #     hybrid_weights = []
-    #     for name in self.visible_names:
-    #         weights = self.datasets[name].get_data_weights_v2()
-    #         hybrid_weights.extend(weights)
-    #     return hybrid_weights
-    #
-    # def register_sampler(self, sampler):
-    #     self.sampler = sampler
-
-    # def set_weights(self, name, weights):
-    #     self.weights[name] = weights
-    #     hybrid_weights = []
-    #     for name in self.visible_names:
-    #         hybrid_weights.extend(self.weights[name])
-    #     num_samples = len(hybrid_weights)
-    #     self.sampler
-    #
-    # def set_sampler_params(self, balance_setting):
-    #     hybrid_weights = []
-    #     for name in self.visible_names:
-    #         dataset = self.datasets[name]
-    #         weights = get_balanced_weights(dataset, balance_setting)
-    #         hybrid_weights.extend(weights)
-    #     num_samples = len(hybrid_weights)
-    #
-    # def sampler(self, name, weights):
-    #     self.weights[name] = weights
-    #     hybrid_weights = []
-    #     for name in self.visible_names:
-    #         hybrid_weights.extend(self.weights[name])
-    #     new_sampler = WeightedRandomSampler(weights, len(weights))
-    #     self.sampler.__dict__ = new_sampler.__dict__.copy()
-    #     #
-    #     # self.samplers = OrderedDict()
-    #     # for name, dataset in self.datasets.items():
-    #     #     weights = dataset.
-    #     #     self.samplers[name] =
-    #     pass
-
-    def hybrid_stream(self, names=None):
-        if names is None:
-            self.visible_names = self.all_names
-        elif isinstance(names, Iterable):
-            for n in names:
-                if n not in self.all_names:
-                    raise KeyError()
-            self.visible_names = names
-        else:
-            raise TypeError()
-
-        self.end_idx = dict()
-        last_end_idx = 0
-        for n in self.visible_names:
-            self.end_idx[n] = len(self.datasets[n]) + last_end_idx
-            last_end_idx = self.end_idx[n]
-
-    def single_stream(self, name):
-        self.hybrid_stream([name])

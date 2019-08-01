@@ -29,12 +29,16 @@ def get_train_dataloader(config):
         for id in range(config.num_hybrids):
             dataset_params = config.hybrid_dataset[id]
             dataset = TrainSet(dataset_params['img_dir'], dataset_params['csv_file'],
-                               config.selected_defects, transform_params)
+                               config.selected_defects, transform_params,
+                               std_csv_file=dataset_params['std_csv_file'],
+                               use_augmentation=config.use_augmentation)
             datasets.append(dataset)
         dataset = HybridSet(*datasets)
     else:
         dataset = TrainSet(config.train_img_dir, config.train_csv_file,
-                           config.selected_defects, transform_params)
+                           config.selected_defects, transform_params,
+                           std_csv_file=config.std_csv_file,
+                           use_augmentation=config.use_augmentation)
     dataloader = get_dataloader(dataset, config.balance_data,
                                 config.train_batch_size, config.num_workers,
                                 shuffle=True)
@@ -48,6 +52,17 @@ def get_test_dataloader(config):
                       config.selected_defects, transform_params)
     dataloader = get_dataloader(dataset, 0, config.test_batch_size,
                                 config.num_workers, shuffle=False)
+    return dataloader
+
+
+@config_override
+def get_unlabeled_dataloader(config):
+    transform_params = get_transform_params(config, 'train')
+    dataset = TestSet(config.unlabeled_img_dir, None,
+                      config.selected_defects, transform_params,
+                      use_augmentation=config.use_augmentation)
+    dataloader = get_dataloader(dataset, 0, config.unlabeled_batch_size,
+                                config.num_workers, shuffle=True)
     return dataloader
 
 
