@@ -41,11 +41,12 @@ The project is still under construction. Future plans include:
 - [x] Conv-BN fusion
 - [x] knowledge distilling
 - [ ] weighted loss
-- [ ] data augmentation
-- [ ] learning with confidence
-- [ ] mean teacher
+- [x] data augmentation
+- [x] learning with confidence
+- [x] mean teacher
 - [ ] better logging system
 - [ ] add more comments
+- [ ] support multi-GPU training
 
 If you have any other problems,
 please submit an issue or contact [mjust.lkc@gmail.com](mailto:mjust.lkc@gmail.com).
