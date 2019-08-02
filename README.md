@@ -40,7 +40,7 @@ are saved to `./reports`.
 The project is still under construction. Future plans include:
 - [x] Conv-BN fusion
 - [x] knowledge distilling
-- [ ] weighted loss
+- [x] weighted loss
 - [x] data augmentation
 - [x] learning with confidence
 - [x] mean teacher

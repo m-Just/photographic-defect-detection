@@ -249,7 +249,7 @@ def determine_device():
 
 
 def at_interval(step, interval, start_index=1):
-    return (step + start_index) % interval == 0
+    return (step + start_index) % interval == 0 if interval > 0 else False
 
 
 def separate_by_index(array, idx):

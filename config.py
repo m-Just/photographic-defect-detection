@@ -17,9 +17,10 @@ def parse_train_args():
     parser.add_argument('--save_ema_models', action='store_true')
     parser.add_argument('--ema_alpha', type=float, default=0.999)
 
-    # image preprocessing
-    parser.add_argument('--input_size', type=int, default=224)
-    parser.add_argument('--crop_size', type=int, default=0)
+    # image preprocessing (crop after resize)
+    parser.add_argument('--input_size', type=int, default=224, help='the size of image after resizing but before cropping')
+    parser.add_argument('--max_input_size', type=int, default=224, help='if this value is larger than input_size then random resize is activated (only at training time)')
+    parser.add_argument('--crop_size', type=int, default=0, help='if this value is a positive integer smaller than the input size, it will become the actual input size')
     parser.add_argument('--resize_mode', type=str, default='area', help='area or linear')
     parser.add_argument('--resize_backend', type=str, default='opencv', help='opencv, torch or pillow')
     parser.add_argument('--crop_method', type=str, default='center', help='center or random')
@@ -86,6 +87,9 @@ def parse_train_args():
 
     # data augmentation
     parser.add_argument('--use_augmentation', action='store_true')
+
+    # weighted loss
+    parser.add_argument('--use_weighted_loss', type=int, default=0)
 
     # mean teacher
     parser.add_argument('--use_mean_teacher', action='store_true')
@@ -158,13 +162,15 @@ def parse_config(config):
     else:
         config.sat_idx = None
 
-    # check if hybrid training is required
+    # gather settings of training dataset
+    config.train_dataset_list = [{
+        'img_dir': config.train_img_dir,
+        'csv_file': config.train_csv_file,
+        'std_csv_file': config.std_csv_file
+    }]
+
+    # add hybrid training if specified
     if config.add_hybrid_dataset:
-        config.hybrid_dataset = [{
-            'img_dir': config.train_img_dir,
-            'csv_file': config.train_csv_file,
-            'std_csv_file': config.std_csv_file
-        }]
         for dataset_str in config.add_hybrid_dataset:
             dataset_params = dataset_str.split(':')
             dataset_dict = {'img_dir': dataset_params[0],
@@ -173,18 +179,18 @@ def parse_config(config):
                 dataset_dict['std_csv_file'] = dataset_params[2]
             else:
                 dataset_dict['std_csv_file'] = None
-            config.hybrid_dataset.append(dataset_dict)
-
-        config.num_hybrids = len(config.hybrid_dataset)
+            config.train_dataset_list.append(dataset_dict)
 
         if config.hybrid_test_id < 0:
             raise ValueError('Please specify which hybrid branch you would'
                              + 'like to use during testing')
+
+        config.num_hybrids = len(config.train_dataset_list)
         assert config.hybrid_test_id < config.num_hybrids
     else:
         config.num_hybrids = 0
 
-    print(config)
+    print(f'Final configurations: {config}')
     return config
 
 
