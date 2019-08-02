@@ -1,0 +1,20 @@
+{
+  "width": 192,
+  "height": 192,
+  "mean": [
+    0,
+    0,
+    0
+  ],
+  "data_scale": 1.0,
+  "padding": false,
+  "lables": [
+     {"label": 0, "value": "Bad Exposure"},
+     {"label": 1, "value": "Bad White Balance"},
+     {"label": 2, "value": "Bad Saturation"},
+     {"label": 3, "value": "Noise"},
+     {"label": 4, "value": "Haze"},
+     {"label": 5, "value": "Undesired Blur"},
+     {"label": 6, "value": "Bad Composition"}
+   ]
+}
