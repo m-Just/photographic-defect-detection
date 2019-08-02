@@ -52,6 +52,10 @@ class Config(edict):
 
 
 class Loss:
+    @property
+    def value(self):
+        return self.weight * self.unweighted_value
+
     def __init__(self, loss_func, weight=1.0, reduce_func=None):
         super(Loss, self).__init__()
         self.loss_func = loss_func
@@ -66,15 +70,12 @@ class Loss:
     def reset_state(self):
         self.reduced = self.reduce_func is None
         self.unweighted_value = None
-        self.value = None
 
     def compute(self, y, t, loss_mask=None, **kwargs):
         self.reset_state()
         self.unweighted_value = self.loss_func(y, t, **kwargs)
         if loss_mask is not None:
             self.unweighted_value *= loss_mask
-        self.value = self.weight * self.unweighted_value
-        assert self.value.grad_fn
         return self.value
 
     def accumulate(self, y, t, loss_mask=None, **kwargs):
@@ -86,9 +87,10 @@ class Loss:
             self.unweighted_value = loss_val
         else:
             self.unweighted_value += loss_val
-        self.value = self.weight * self.unweighted_value
-        assert self.value.grad_fn
         return self.value
+
+    def apply(self, func):
+        self.unweighted_value = func(self.unweighted_value)
 
     def reduce(self):
         if self.reduced:
@@ -101,7 +103,6 @@ class Loss:
     def reduce_(self):
         if not self.reduced:
             self.unweighted_value = self.reduce_func(self.unweighted_value)
-            self.value = self.weight * self.unweighted_value
             self.reduced = True
         return self
 
@@ -226,6 +227,20 @@ class Timer:
             raise RuntimeError()
 
 
+class DataFlow:
+    def __init__(self, dataloader):
+        self.dataloader = dataloader
+        self.dataiter = iter(dataloader)
+
+    def get_batch(self):
+        try:
+            batch = next(self.dataiter)
+        except StopIteration:
+            self.dataiter = iter(self.dataloader)
+            batch = next(self.dataiter)
+        return batch
+
+
 # ------------------------------ Helper functions ------------------------------
 
 def determine_device():
@@ -234,17 +249,17 @@ def determine_device():
 
 
 def at_interval(step, interval, start_index=1):
-    return (step + start_index) % interval == 0
+    return (step + start_index) % interval == 0 if interval > 0 else False
 
 
-def separate_by_index(array, sat_idx):
+def separate_by_index(array, idx):
     if isinstance(array, np.ndarray) or torch.is_tensor(array):
-        r = list(range(sat_idx)) + list(range(sat_idx+1, array.shape[1]))
-        return array[:, r], array[:, [sat_idx]]
-    # elif isinstance(array, list):
-    #     r = list(range(len(array)))
-    #     r.remove(sat_idx)
-    #     return [array[i] for i in r], [array[sat_idx]]
+        r = list(range(idx)) + list(range(idx+1, array.shape[1]))
+        return array[:, r], array[:, [idx]]
+    elif isinstance(array, list):
+        r = list(range(len(array)))
+        r.remove(idx)
+        return [array[i] for i in r], [array[idx]]
     elif isinstance(array, Iterable):
         raise NotImplementedError()
     else:

@@ -24,17 +24,21 @@ def get_dataloader(dataset, balance_data, batch_size, num_workers, shuffle=True)
 @config_override
 def get_train_dataloader(config):
     transform_params = get_transform_params(config, 'train')
+
+    def create_dataset(img_dir, csv_file, std_csv_file):
+        return TrainSet(img_dir, csv_file, config.selected_defects,
+                        transform_params, std_csv_file=std_csv_file,
+                        use_augmentation=config.use_augmentation,
+                        use_weighted_loss=config.use_weighted_loss)
+
+    datasets = []
+    for dataset_config in config.train_dataset_list:
+        dataset = create_dataset(**dataset_config)
+        datasets.append(dataset)
+
     if config.num_hybrids:
-        datasets = []
-        for id in range(config.num_hybrids):
-            dataset_params = config.hybrid_dataset[id]
-            dataset = TrainSet(dataset_params['img_dir'], dataset_params['csv_file'],
-                               config.selected_defects, transform_params)
-            datasets.append(dataset)
         dataset = HybridSet(*datasets)
-    else:
-        dataset = TrainSet(config.train_img_dir, config.train_csv_file,
-                           config.selected_defects, transform_params)
+
     dataloader = get_dataloader(dataset, config.balance_data,
                                 config.train_batch_size, config.num_workers,
                                 shuffle=True)
@@ -51,6 +55,16 @@ def get_test_dataloader(config):
     return dataloader
 
 
+@config_override
+def get_unlabeled_dataloader(config):
+    transform_params = get_transform_params(config, 'train')
+    dataset = TestSet(config.unlabeled_img_dir, None,
+                      config.selected_defects, transform_params)
+    dataloader = get_dataloader(dataset, 0, config.unlabeled_batch_size,
+                                config.num_workers, shuffle=True)
+    return dataloader
+
+
 # DEBUG
 def get_ranking_dataloader(config):
     real_world_set = TestSet(img_dir='ext/xiaomi/st_test',
@@ -63,6 +77,13 @@ def get_ranking_dataloader(config):
 
 
 def measure_dist_by_sampling(dataloader, num_epoches=1):
+    ''' Measure the label distribution by sampling a given dataloader.
+    Args:
+        dataloader: a torch.utils.data.dataloader object.
+        num_epoches: sample for how many number of epoches.
+    Returns:
+        an 1D torch tensor containing all the labels sampled.
+    '''
     labels = []
     for epoch in range(num_epoches):
         for i, data in enumerate(dataloader):

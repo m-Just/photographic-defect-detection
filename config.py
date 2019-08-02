@@ -17,9 +17,10 @@ def parse_train_args():
     parser.add_argument('--save_ema_models', action='store_true')
     parser.add_argument('--ema_alpha', type=float, default=0.999)
 
-    # image preprocessing
-    parser.add_argument('--input_size', type=int, default=224)
-    parser.add_argument('--crop_size', type=int, default=0)
+    # image preprocessing (crop after resize)
+    parser.add_argument('--input_size', type=int, default=224, help='the size of image after resizing but before cropping')
+    parser.add_argument('--max_input_size', type=int, default=224, help='if this value is larger than input_size then random resize is activated (only at training time)')
+    parser.add_argument('--crop_size', type=int, default=0, help='if this value is a positive integer smaller than the input size, it will become the actual input size')
     parser.add_argument('--resize_mode', type=str, default='area', help='area or linear')
     parser.add_argument('--resize_backend', type=str, default='opencv', help='opencv, torch or pillow')
     parser.add_argument('--crop_method', type=str, default='center', help='center or random')
@@ -39,7 +40,7 @@ def parse_train_args():
     parser.add_argument('--net_type', type=str, default='shufflenet', help='shufflenet, shufflenet_v2 or resnet')
     parser.add_argument('--logits_act_type', type=str, default='sigmoid', help='sigmoid or softmax')
     parser.add_argument('--load_pretrained', action='store_true', help='whether to use pretrained model or randomly initialized model')
-    parser.add_argument('--ckpt_path', type=str, default='', help='leave blank to use imagenet pretrained weight')
+    parser.add_argument('--ckpt_path', type=str, default=None, help='leave blank to use imagenet pretrained weight')    # NOTE: you can set default value of any type
     parser.add_argument('--dropout_rate', type=float, default=0.5)
     parser.add_argument('--global_pooling_mode', type=str, default='average', help='average, combined, avgofmax or maxofavg')
 
@@ -54,7 +55,7 @@ def parse_train_args():
     parser.add_argument('--num_layers', type=int, default=18, help='18, 34, 50, 101 or 152')
 
     # prediction head - hybrid
-    parser.add_argument('--add_hybrid_dataset', action='append', help='append additional dataset for hybrid training, must be in the format of [img_dir]:[csv_file]')
+    parser.add_argument('--add_hybrid_dataset', action='append', help='add dataset for hybrid training in addition to the original dataset, must be in the format of [img_dir]:[csv_file]:[std_csv_file(optional)]')
     parser.add_argument('--hybrid_test_id', type=int, default=-1, help='which of the hybrid heads should be used at testing time')
 
     # prediction head - softmax
@@ -79,12 +80,29 @@ def parse_train_args():
 
     # knowledge distillation
     parser.add_argument('--use_kd', action='store_true', help='whether to use knowledge distillation')
-    parser.add_argument('--kd_weight', type=float, default=1.0, help='weight for the knowledge distilling loss')
+    parser.add_argument('--kd_loss_weight', type=float, default=1.0, help='weight for the knowledge distilling loss')
+
+    # learning with confidence (currently only support regression model)
+    parser.add_argument('--std_csv_file', type=str, default=None, help='path to the csv file of the standard deviations of annotations')
+
+    # data augmentation
+    parser.add_argument('--use_augmentation', action='store_true')
+
+    # weighted loss
+    parser.add_argument('--use_weighted_loss', type=int, default=0)
+
+    # mean teacher
+    parser.add_argument('--use_mean_teacher', action='store_true')
+    parser.add_argument('--cst_loss_weight', type=float, default=1.)
+    parser.add_argument('--teacher_ema_alpha', type=float, default=0.99)
+    parser.add_argument('--rampup_length', type=int, default=20)
+    parser.add_argument('--unlabeled_img_dir', type=str, default='dataset/unlabeled_512')
+    parser.add_argument('--unlabeled_batch_size', type=int, default=96, help='change this value accordingly to match the desired ratio with train_batch_size')
 
     # others
     parser.add_argument('--val_interval', type=int, default=50, help='number of iterations between every runtime validation')
     parser.add_argument('--ckpt_interval', type=int, default=10, help='number of epoches between every checkpoint saving')
-    parser.add_argument('--model_restore_err_handling', type=str, default='notify', help='notify, raise or suppress')
+    parser.add_argument('--model_restore_err_handling', type=str, default='suppress', help='notify, raise or suppress')
     parser.add_argument('--tb_log_dir', type=str, default='runs', help='root directory to save the tensorboard records')
     parser.add_argument('--print_network', action='store_true', help='whether to print out network architecture, useful for debugging')
     parser.add_argument('--save_input_images', action='store_true', help='whether to show sampled input images on tensorboard')
@@ -120,7 +138,7 @@ def parse_eval_args():
     parser.add_argument('--test_subjective', action='store_true')
     parser.add_argument('--use_ema_model', action='store_true')
     parser.add_argument('--use_averaged_weight', action='store_true')
-    parser.add_argument('--record_suffix', type=str, default='')
+    parser.add_argument('--record_suffix', type=str, default=None)
     parser.add_argument('--fuse_conv_bn', action='store_true')
     parser.add_argument('--print_network', action='store_true')
 
@@ -144,21 +162,39 @@ def parse_config(config):
     else:
         config.sat_idx = None
 
-    # check if hybrid training is required
+    # gather settings of training dataset
+    config.train_dataset_list = [{
+        'img_dir': config.train_img_dir,
+        'csv_file': config.train_csv_file,
+        'std_csv_file': config.std_csv_file
+    }]
+
+    # add hybrid training if specified
     if config.add_hybrid_dataset:
-        config.hybrid_dataset = [{
-            'img_dir': config.train_img_dir,
-            'csv_file': config.train_csv_file
-        }]
         for dataset_str in config.add_hybrid_dataset:
             dataset_params = dataset_str.split(':')
-            config.hybrid_dataset.append({'img_dir': dataset_params[0],
-                                          'csv_file': dataset_params[1]})
-        config.num_hybrids = len(config.hybrid_dataset)
+            dataset_dict = {'img_dir': dataset_params[0],
+                            'csv_file': dataset_params[1]}
+            if len(dataset_params) > 2:
+                dataset_dict['std_csv_file'] = dataset_params[2]
+            else:
+                dataset_dict['std_csv_file'] = None
+            config.train_dataset_list.append(dataset_dict)
 
+        if config.hybrid_test_id < 0:
+            raise ValueError('Please specify which hybrid branch you would'
+                             + 'like to use during testing')
+
+        config.num_hybrids = len(config.train_dataset_list)
         assert config.hybrid_test_id < config.num_hybrids
     else:
         config.num_hybrids = 0
 
-    print(config)
+    print(f'Final configurations: {config}')
     return config
+
+
+def eval_override(config):
+    config.save_ema_models = False
+    config.use_kd = False
+    config.use_mean_teacher = False

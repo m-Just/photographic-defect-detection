@@ -10,7 +10,7 @@ from dataloader import get_test_dataloader
 from utils import Config, CSV_Writer
 from utils import avg_over_state_dict, determine_device, get_defect_names_by_idx
 from utils import makedirs_if_not_exists
-from config import parse_eval_args, parse_config
+from config import parse_eval_args, parse_config, eval_override
 from metric import compute_ranking_accuracy
 
 
@@ -98,7 +98,7 @@ def main(config):
     if config.print_network:
         print(model)
 
-    wrap = get_model_wrap(config, model, None, device)
+    wrap = get_model_wrap(config, model, None, None, device)
 
     record_name = config.model_name
     record_name += f'_epoch{config.epoch}'
@@ -114,7 +114,7 @@ def main(config):
     # evaluate spearman correlation
     if config.test_spearman:
         test_dataloader = get_test_dataloader(config)
-        _, corr = wrap.validate(test_dataloader)
+        _, corr = wrap.validate(test_dataloader, compute_loss=False)
         print(corr)
         write_spearman_to_csv(corr, config.selected_defects, record_name, config.csv_save_dir)
 
@@ -153,7 +153,7 @@ if __name__ == '__main__':
     config.update(vars(eval_config))
 
     # override specific configurations to avoid unwanted behaviors
-    config.save_ema_models = False  # this is only used at training time
+    eval_override(config)
 
     # main program
     main(parse_config(config))

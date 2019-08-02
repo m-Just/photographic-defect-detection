@@ -48,12 +48,20 @@ def apply_lr_schedule(optimizer, lr_decay_rate, lr_decay_min):
 def main(config):
     device = determine_device()
 
+    # build model
     model = Network(config)
     model.train()
     model = model.to(device)
     if config.print_network:
         print(model)
 
+    # calculate the number of trainable variables
+    param_num = 0
+    for param in model.parameters():
+        param_num += int(np.prod(param.shape))
+    print(f'Trainable params: {(param_num / 1e6):.2f} million')
+
+    # set up optimizer and learning rate schedule
     optimizer = get_optimizer(config.optimizer_type, config.lr, config.momentum,
                               config.pretrain_lr, model.pretrain_params,
                               config.randinit_lr, model.randinit_params)
@@ -61,20 +69,18 @@ def main(config):
         scheduler = apply_lr_schedule(
             optimizer, config.lr_decay_rate, config.lr_decay_min)
 
-    if config.use_kd:
-        knowledge_model = Network(config, load_pretrained=True, ckpt_path='')
-        knowledge_model = knowledge_model.to(device)
-    else:
-        knowledge_model = None
-    wrap = get_model_wrap(config, model, optimizer, device,
-                          knowledge_model=knowledge_model)
+    # wrap model
+    status_dict = {'num_epoches': None, 'num_steps': None}   # TODO create a helper class
+    wrap = get_model_wrap(config, model, optimizer, status_dict, device)
 
+    # set up dataloaders
     train_dataloader = get_train_dataloader(config)
     test_dataloader = get_test_dataloader(config)
 
     print(f'Train dataloader: {len(train_dataloader)} batches/epoch, batch_size={config.train_batch_size}')
     print(f'Test dataloader: {len(test_dataloader)} batches/epoch, batch_size={config.test_batch_size}')
 
+    # set up tensorboard writer
     log_dir = f'./{config.tb_log_dir}/{config.model_name}'
     writer = TensorboardWriter(log_dir, get_defect_names_by_idx(config.selected_defects))
 
@@ -83,6 +89,7 @@ def main(config):
 
     num_steps = 0
     for epoch in range(config.epoches):
+        status_dict['num_epoches'] = epoch
         # DEBUG
         # with Timer('blur ranking'):
         #     acc_dict = evaluate_blur_ranking_accuracy(wrap, real_world_loader,
@@ -90,6 +97,8 @@ def main(config):
         # writer.add_dict('eval', acc_dict, num_steps)
 
         for i, data in enumerate(train_dataloader):
+            status_dict['num_steps'] = num_steps
+
             # training iteration
             wrap.train(data)
             if config.save_ema_models:
