@@ -14,6 +14,7 @@
 1. Set up the packaging environment.
 2. Arrange the model files in order.
 3. Use the package script (`testing_build/package.sh`).
+
 For detailed instructions, please refer [here](http://note.youdao.com/noteshare?id=93964ab18a4907782fb5b3a39c7fbbfd).
 
 ## Problems
