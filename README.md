@@ -44,6 +44,7 @@ The project is still under construction. Future plans include:
 - [x] data augmentation
 - [x] learning with confidence
 - [x] mean teacher
+- [ ] gradient tuning
 - [ ] better logging system
 - [ ] add more comments
 - [ ] support multi-GPU training
