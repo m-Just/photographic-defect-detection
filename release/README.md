@@ -6,6 +6,7 @@
 ## How to convert pytorch models to caffe models
 * Install caffe and pycaffe.  
 * Put `model_libs.py` under `[CAFFE_HOME]/python/caffe`.
+* Prepare the testing images used for computing errors between the original and the converted model under `./align_samples` (create one if the folder does not exist).
 * Use `python convert_model_to_caffe.py` to generate caffemodel and prototxt:
   * Modify the model implemented in PyCaffe to support new architectures.
   * Run the script until it waits for user prompt.
@@ -17,11 +18,12 @@
     * Change its bottom layer to the closest pooling layer.
   * Remove dummy data layers and all their references.
   * Replace all `ShuffleChannel` with `ChannelShuffle`, and all `shuffle_channel_param` with `channel_shuffle_param`.
+* Along with the generated caffemodel and prototxt, there will also be a `./test_scores.csv` that records all the model predictions of the testing images.
 
 ## How to package
 1. Set up the packaging environment.
 2. Arrange the model files in order.
-3. Use the package script (`testing_build/package.sh`).
+3. Run the package script (`testing_build/package.sh`).
 
 For detailed instructions, please refer [here](http://note.youdao.com/noteshare?id=93964ab18a4907782fb5b3a39c7fbbfd).
 
